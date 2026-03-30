@@ -121,6 +121,37 @@ class HasAncestryTreeTest < ActiveSupport::TestCase
     end
   end
 
+  def test_non_id_primary_key_column
+    connection = ActiveRecord::Base.connection
+
+    connection.create_table :uuid_nodes, id: false do |table|
+      table.string :uuid, null: false
+      table.string :ancestry, **AncestryTestDatabase.column_options(force_allow_nil: true)
+    end
+    connection.add_index :uuid_nodes, :uuid, unique: true
+    connection.add_index :uuid_nodes, :ancestry
+
+    model = Class.new(ActiveRecord::Base)
+    self.class.const_set :UuidNode, model
+
+    model.table_name = "uuid_nodes"
+    model.primary_key = "uuid"
+    model.has_ancestry primary_key_format: :uuid
+
+    root = model.create!(uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    child = model.create!(
+      uuid: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      parent: root
+    )
+
+    assert_equal [child.uuid], root.child_ids
+    assert_equal [], child.sibling_ids
+    assert_equal [root.uuid, child.uuid], model.subtree_of(root).pluck(model.primary_key)
+  ensure
+    connection.drop_table :uuid_nodes, if_exists: true
+    self.class.send(:remove_const, :UuidNode) if self.class.const_defined?(:UuidNode, false)
+  end
+
   def test_acts_as_tree
     AncestryTestDatabase.with_model skip_ancestry: true do |model|
       model.acts_as_tree
